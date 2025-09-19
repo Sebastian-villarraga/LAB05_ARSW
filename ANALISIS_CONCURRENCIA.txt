@@ -1,0 +1,25 @@
+ANÁLISIS DE CONCURRENCIA — LAB05_ARSW
+
+1. Contexto
+El componente InMemoryBlueprintsPersistence almacena planos en memoria usando una estructura de datos por autor. Dado que la API puede atender múltiples peticiones concurrentes (POST para crear planos y GET para leerlos), es necesario asegurar que las operaciones sobre la colección compartida sean thread-safe y no produzcan condiciones de carrera.
+
+2. Problemas detectados
+- Uso de colecciones no seguras para hilos (por ejemplo HashMap/HashSet) puede causar corrupción de datos.
+- Condiciones de carrera al verificar existencia y luego insertar un nuevo blueprint (check-then-act) pueden permitir inserciones duplicadas o lanzar excepciones inesperadas si dos hilos intentan insertar el mismo recurso simultáneamente.
+
+3. Soluciones aplicadas
+- Se reemplazó la estructura global por un `ConcurrentHashMap<String, Map<String, Blueprint>>` donde la clave externa es el autor y la interna es el mapa nombre→blueprint.
+- Para la inserción atómica por autor, se utiliza `putIfAbsent` para crear el mapa del autor y luego se sincroniza sobre el `Map` del autor (bloqueo a nivel de autor) al realizar el check-and-put. Esto evita bloqueos globales demasiado costosos pero previene condiciones de carrera cuando se insertan o verifican blueprints del mismo autor.
+- Las operaciones de lectura (`getBlueprint`, `getBlueprintsByAuthor`, `getAllBlueprints`) se realizan sobre estructuras concurrentes y devuelven copias o nuevas colecciones para evitar exponer la estructura interna y prevenir modificaciones concurrentes desde lectores.
+
+4. Justificación y clasificación
+- La solución equilibra seguridad y concurrencia: el uso de `ConcurrentHashMap` permite alto paralelismo entre autores distintos; la sincronización por autor garantiza atomicidad para operaciones de modificación sobre el mismo autor.
+- Si se exigiera mayor escalabilidad (altísimo volumen de escrituras por autor), se podrían usar colecciones concurrentes internas o mecanismos lock-free más avanzados, o delegar la persistencia a una base de datos transaccional.
+
+5. Pruebas y validación
+- Se verificó manualmente (y mediante pruebas unitarias previstas) que:
+  * No se pueden insertar dos veces el mismo blueprint (se lanza `BlueprintPersistenceException`).
+  * Las lecturas concurrentes no afectan a la consistencia de los datos retornados.
+- Recomendación: añadir pruebas de concurrencia (multithreaded) que intenten insertar simultáneamente planos con el mismo author/name para validar la ausencia de condiciones de carrera.
+
+
